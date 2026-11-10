@@ -39,8 +39,7 @@ jobs:
             local code
             code=$(curl -sS -L --compressed -A "$UA" -m 40 -o "$tmp" -w '%{http_code}' \
               "https://node.freeclashnode.com/uploads/$YM/$g-$DAY.txt" 2>/dev/null || echo 000)
-            if [ "$code" = "200" ] && [ -s "$tmp" ] \
-               && ! head -c 1 "$tmp" | grep -q '<'; then
+            if [ "$code" = "200" ] && [ -s "$tmp" ] && ! head -c 1 "$tmp" | grep -q '<'; then
               mv "$tmp" "$OUT/$g.txt"
               echo 200
             else
@@ -71,16 +70,27 @@ jobs:
             head -c 1 "$f" | grep -q '<' && rm -f "$f"
           done
           ls -l "$OUT" || true
-          DAY="$DAY" python3 - <<'PY'
+
+          n=$(ls "$OUT"/*.txt 2>/dev/null | wc -l)
+          echo "downloaded=$n"
+          if [ "$n" -ge 1 ]; then
+            : > data/urls.txt
+            for f in "$OUT"/*.txt; do
+              g=$(basename "$f" .txt)
+              echo "https://ghproxy.net/https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/data/$DAY/$g.txt" >> data/urls.txt
+            done
+            echo "--- urls.txt"
+            cat data/urls.txt
+            DAY="$DAY" python3 - <<'PY'
           import glob, json, os
           day = os.environ["DAY"]
           files = {}
           for p in sorted(glob.glob(f"data/{day}/*.txt")):
               files[os.path.basename(p)] = os.path.getsize(p)
-          os.makedirs("data", exist_ok=True)
           json.dump({"date": day, "files": files}, open("data/latest.json", "w"), ensure_ascii=False, indent=1)
           print("SUMMARY", json.dumps(files, ensure_ascii=False))
           PY
+          fi
 
       - name: prune old data
         run: |
