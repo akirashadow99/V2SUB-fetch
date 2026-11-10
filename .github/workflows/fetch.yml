@@ -78,6 +78,7 @@ jobs:
             for f in "$OUT"/*.txt; do
               g=$(basename "$f" .txt)
               echo "https://ghproxy.net/https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/data/$DAY/$g.txt" >> data/urls.txt
+              echo "https://gh-proxy.com/https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/data/$DAY/$g.txt" >> data/urls.txt
             done
             echo "--- urls.txt"
             cat data/urls.txt
