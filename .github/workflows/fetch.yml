@@ -34,13 +34,17 @@ jobs:
           echo "DAY=$DAY  YM=$YM"
 
           get() {
-            local g="$1" tmp="$OUT/$g.tmp" code
+            local g="$1"
+            local tmp="$OUT/$g.tmp"
+            local code
             code=$(curl -sS -L --compressed -A "$UA" -m 40 -o "$tmp" -w '%{http_code}' \
               "https://node.freeclashnode.com/uploads/$YM/$g-$DAY.txt" 2>/dev/null || echo 000)
             if [ "$code" = "200" ] && [ -s "$tmp" ]; then
-              mv "$tmp" "$OUT/$g.txt"; echo 200
+              mv "$tmp" "$OUT/$g.txt"
+              echo 200
             else
-              rm -f "$tmp"; echo "$code"
+              rm -f "$tmp"
+              echo "$code"
             fi
           }
 
