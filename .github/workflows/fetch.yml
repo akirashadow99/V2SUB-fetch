@@ -1,0 +1,91 @@
+
+name: fetch
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: fetch subscription files
+        shell: bash
+        env:
+          TZ: Asia/Shanghai
+        run: |
+          set -u
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+          DAY=$(date +%Y%m%d)
+          YM=$(date +%Y/%m)
+          OUT="data/$DAY"
+          mkdir -p "$OUT"
+          echo "DAY=$DAY  YM=$YM"
+
+          get() {
+            local g="$1" tmp="$OUT/$g.tmp" code
+            code=$(curl -sS -L --compressed -A "$UA" -m 40 -o "$tmp" -w '%{http_code}' \
+              "https://node.freeclashnode.com/uploads/$YM/$g-$DAY.txt" 2>/dev/null || echo 000)
+            if [ "$code" = "200" ] && [ -s "$tmp" ]; then
+              mv "$tmp" "$OUT/$g.txt"; echo 200
+            else
+              rm -f "$tmp"; echo "$code"
+            fi
+          }
+
+          deadline=$((SECONDS + 1500))
+          while :; do
+            c=$(get 0)
+            echo "group0 -> $c"
+            [ "$c" = "200" ] && break
+            [ $SECONDS -ge $deadline ] && break
+            sleep 120
+          done
+
+          miss=0
+          for g in 1 2 3 4 5 6 7 8 9; do
+            c=$(get "$g")
+            echo "group$g -> $c"
+            if [ "$c" = "200" ]; then miss=0; else miss=$((miss+1)); fi
+            [ $miss -ge 3 ] && break
+          done
+
+          ls -l "$OUT" || true
+          DAY="$DAY" python3 - <<'PY'
+          import glob, json, os
+          day = os.environ["DAY"]
+          files = {}
+          for p in sorted(glob.glob(f"data/{day}/*.txt")):
+              files[os.path.basename(p)] = os.path.getsize(p)
+          os.makedirs("data", exist_ok=True)
+          json.dump({"date": day, "files": files}, open("data/latest.json", "w"), ensure_ascii=False, indent=1)
+          print("SUMMARY", json.dumps(files, ensure_ascii=False))
+          PY
+
+      - name: prune old data
+        run: |
+          find data -mindepth 1 -maxdepth 1 -type d -name '20*' | sort | head -n -3 | xargs -r rm -rf
+          du -sh data || true
+
+      - name: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "no change"
+          else
+            git commit -m "data $(TZ=Asia/Shanghai date +%F)"
+            git push
+          fi
