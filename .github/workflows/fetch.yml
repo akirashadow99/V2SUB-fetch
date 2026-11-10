@@ -67,6 +67,10 @@ jobs:
             [ $miss -ge 3 ] && break
           done
 
+          for f in "$OUT"/*.txt; do
+            [ -e "$f" ] || continue
+            grep -q '://' "$f" || rm -f "$f"
+          done
           ls -l "$OUT" || true
           DAY="$DAY" python3 - <<'PY'
           import glob, json, os
