@@ -5,6 +5,11 @@ on:
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:
+    inputs:
+      day:
+        description: "YYYYMMDD override (default: yesterday, Asia/Shanghai)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -16,7 +21,7 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -24,11 +29,13 @@ jobs:
         shell: bash
         env:
           TZ: Asia/Shanghai
+          INPUT_DAY: ${{ inputs.day }}
         run: |
           set -u
           UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
-          DAY=$(date +%Y%m%d)
-          YM=$(date +%Y/%m)
+          # 站点当天的文件大约 10:00 才发布，取前一天最稳
+          DAY="${INPUT_DAY:-$(date -d 'yesterday' +%Y%m%d)}"
+          YM="$(printf '%s' "$DAY" | cut -c1-4)/$(printf '%s' "$DAY" | cut -c5-6)"
           OUT="data/$DAY"
           mkdir -p "$OUT"
           echo "DAY=$DAY  YM=$YM"
@@ -36,33 +43,28 @@ jobs:
           get() {
             local g="$1"
             local tmp="$OUT/$g.tmp"
-            local code
-            code=$(curl -sS -L --compressed -A "$UA" -m 40 -o "$tmp" -w '%{http_code}' \
-              "https://node.freeclashnode.com/uploads/$YM/$g-$DAY.txt" 2>/dev/null || echo 000)
-            if [ "$code" = "200" ] && [ -s "$tmp" ] && ! head -c 1 "$tmp" | grep -q '<'; then
-              mv "$tmp" "$OUT/$g.txt"
-              echo 200
-            else
+            local code=""
+            local attempt
+            for attempt in 1 2 3; do
+              code=$(curl -sS -L --compressed -A "$UA" -m 40 -o "$tmp" -w '%{http_code}' \
+                "https://node.clashnode.cc/uploads/$YM/$g-$DAY.txt" 2>/dev/null || echo 000)
+              if [ "$code" = "200" ] && [ -s "$tmp" ] && ! head -c 1 "$tmp" | grep -q '<'; then
+                mv "$tmp" "$OUT/$g.txt"
+                echo 200
+                return
+              fi
               rm -f "$tmp"
-              echo "reject-$code"
-            fi
+              sleep 20
+            done
+            echo "reject-$code"
           }
 
-          deadline=$((SECONDS + 1500))
-          while :; do
-            c=$(get 0)
-            echo "group0 -> $c"
-            [ "$c" = "200" ] && break
-            [ $SECONDS -ge $deadline ] && break
-            sleep 120
-          done
-
           miss=0
-          for g in 1 2 3 4 5 6 7 8 9; do
+          for g in 0 1 2 3 4 5 6; do
             c=$(get "$g")
             echo "group$g -> $c"
             if [ "$c" = "200" ]; then miss=0; else miss=$((miss+1)); fi
-            [ $miss -ge 3 ] && break
+            [ "$miss" -ge 2 ] && break
           done
 
           for f in "$OUT"/*.txt; do
@@ -80,8 +82,6 @@ jobs:
               echo "https://ghproxy.net/https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/data/$DAY/$g.txt" >> data/urls.txt
               echo "https://gh-proxy.com/https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/data/$DAY/$g.txt" >> data/urls.txt
             done
-            echo "--- urls.txt"
-            cat data/urls.txt
             DAY="$DAY" python3 - <<'PY'
           import glob, json, os
           day = os.environ["DAY"]
